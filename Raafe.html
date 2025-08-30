@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Courier Summary Tool</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #f7f9fb;
+      padding: 30px;
+      display: flex;
+      justify-content: center;
+    }
+    .container {
+      max-width: 950px;
+      width: 100%;
+      background: #fff;
+      padding: 25px 30px;
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+    }
+    h2, h3 {
+      margin-top: 0;
+      color: #333;
+    }
+    textarea {
+      width: 100%;
+      height: 160px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      margin-bottom: 15px;
+      resize: vertical;
+      font-size: 14px;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 15px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 6px 10px;
+      text-align: center;
+    }
+    th {
+      background: #f0f2f5;
+      font-weight: 600;
+      color: #333;
+    }
+    tr:nth-child(even) {
+      background: #fafafa;
+    }
+    tr:hover {
+      background: #f1f7ff;
+    }
+    .totals {
+      background: #eafbea !important;
+      font-weight: bold;
+    }
+    button {
+      margin: 5px 8px 15px 0;
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      background: #4a90e2;
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+    button:hover {
+      background: #357ac9;
+    }
+    .btn-download {
+      background: #27ae60;
+    }
+    .btn-download:hover {
+      background: #1e8e4d;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h2>📦 Courier Summary Tool</h2>
+    <p>Paste your order data below:</p>
+    <textarea id="inputData"></textarea><br>
+    <button onclick="processData()">Generate Summary</button>
+    <button class="btn-download" onclick="downloadExcel()">⬇️ Download Excel</button>
+
+    <h3>📌 Product Wise Summary</h3>
+    <table id="productTable">
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>Total Qty</th>
+          <th>BlueDart</th>
+          <th>Ekart</th>
+          <th>Delhivery</th>
+          <th>XpressBees</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <h3>🚚 Courier Totals</h3>
+    <table id="courierTable">
+      <thead>
+        <tr>
+          <th>Courier</th>
+          <th>Total Qty</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    function normalizeCourier(name) {
+      name = name.toLowerCase();
+      if (name.includes("blue")) return "blue";
+      if (name.includes("eka")) return "ekart";
+      if (name.includes("del")) return "del";
+      if (name.includes("xps") || name.includes("express")) return "xps";
+      return "other";
+    }
+    function extractVariant(name) {
+      name = name.toLowerCase();
+      if (name.includes("pack 1") || name.includes("p1")) return "P1";
+      if (name.includes("pack 2") || name.includes("p2")) return "P2";
+      if (name.includes("pack 3") || name.includes("p3")) return "P3";
+      if (name.includes("b1g1")) return "B1G1";
+      if (name.includes("b2g2")) return "B2G2";
+      return "";
+    }
+    function extractBaseName(name) {
+      return name
+        .replace(/pack\s*\d+/gi, "")
+        .replace(/\bp\d+\b/gi, "")
+        .replace(/b1g1/gi, "")
+        .replace(/b2g2/gi, "")
+        .replace(/-/g, "")
+        .trim();
+    }
+    function parseQuantity(text) {
+      let numbers = text.match(/\d+/g);
+      if (!numbers) return 0;
+      return numbers.map(n => parseInt(n)).reduce((a,b)=>a+b,0);
+    }
+
+    function processData() {
+      let input = document.getElementById("inputData").value;
+      let lines = input.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+
+      let products = {};
+      let courierTotals = { blue: 0, ekart: 0, del: 0, xps: 0 };
+
+      let currentProduct = null, currentVariant = "", currentTotal = 0;
+      let currentCouriers = { blue: 0, ekart: 0, del: 0, xps: 0 };
+
+      function saveCurrent() {
+        if (!currentProduct) return;
+        let key = extractBaseName(currentProduct) + "|" + currentVariant;
+        if (!products[key]) {
+          products[key] = { 
+            product: extractBaseName(currentProduct) + (currentVariant ? " " + currentVariant : ""),
+            total: 0, blue: 0, ekart: 0, del: 0, xps: 0
+          };
+        }
+        products[key].total += currentTotal;
+        products[key].blue += currentCouriers.blue;
+        products[key].ekart += currentCouriers.ekart;
+        products[key].del += currentCouriers.del;
+        products[key].xps += currentCouriers.xps;
+      }
+
+      lines.forEach(line => {
+        if (line.toLowerCase().startsWith("product:")) {
+          saveCurrent();
+          currentProduct = line.split("Product:")[1].trim();
+          currentVariant = extractVariant(currentProduct);
+          currentTotal = 0;
+          currentCouriers = { blue: 0, ekart: 0, del: 0, xps: 0 };
+        }
+        else if (line.toLowerCase().startsWith("total quantity")) {
+          currentTotal = parseQuantity(line);
+        }
+        else if (line.match(/blue|ekart|del|xps/i)) {
+          let parts = line.replace(".", "").split(":");
+          if (parts.length < 2) parts = line.split("-");
+          let courierName = normalizeCourier(parts[0].trim());
+          let qty = parseQuantity(parts[1] || "");
+          if (courierName in currentCouriers) {
+            currentCouriers[courierName] += qty;
+            courierTotals[courierName] += qty;
+          }
+        }
+        else if (line.includes("-") && !line.toLowerCase().includes("courier")) {
+          saveCurrent();
+          let parts = line.split("-");
+          currentProduct = parts[0].trim();
+          currentVariant = extractVariant(currentProduct);
+          currentTotal = parseQuantity(parts[1]);
+          currentCouriers = { blue: 0, ekart: 0, del: 0, xps: 0 };
+        }
+      });
+      saveCurrent();
+
+      // Fill Product Table
+      let productTable = document.querySelector("#productTable tbody");
+      productTable.innerHTML = "";
+      Object.values(products).forEach(p => {
+        let row = `<tr>
+          <td>${p.product}</td>
+          <td>${p.total}</td>
+          <td>${p.blue}</td>
+          <td>${p.ekart}</td>
+          <td>${p.del}</td>
+          <td>${p.xps}</td>
+        </tr>`;
+        productTable.innerHTML += row;
+      });
+
+      // Fill Courier Totals
+      let courierTable = document.querySelector("#courierTable tbody");
+      courierTable.innerHTML = `
+        <tr class="totals"><td>BlueDart</td><td>${courierTotals.blue}</td></tr>
+        <tr class="totals"><td>Ekart</td><td>${courierTotals.ekart}</td></tr>
+        <tr class="totals"><td>Delhivery</td><td>${courierTotals.del}</td></tr>
+        <tr class="totals"><td>XpressBees</td><td>${courierTotals.xps}</td></tr>
+      `;
+    }
+
+    function downloadExcel() {
+      let productTable = document.querySelector("#productTable");
+      let wb = XLSX.utils.book_new();
+      let ws = XLSX.utils.table_to_sheet(productTable);
+      XLSX.utils.book_append_sheet(wb, ws, "Product Summary");
+      XLSX.writeFile(wb, "Product_Summary.xlsx");
+    }
+  </script>
+</body>
+</html>
